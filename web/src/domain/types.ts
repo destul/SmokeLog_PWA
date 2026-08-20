@@ -16,6 +16,7 @@ export type ConsumptionEvent = {
   productId: string
   category: Category
   quantity: number
+  tagId?: string
   occurredAt: string
   createdAt: string
   updatedAt: string

@@ -66,6 +66,16 @@ export async function deleteEvent(eventId: string): Promise<void> {
   await (await database()).delete('events', eventId)
 }
 
+export async function importBackup(backup: { products: Product[]; events: ConsumptionEvent[] }): Promise<void> {
+  const db = await database()
+  const transaction = db.transaction(['products', 'events'], 'readwrite')
+  await Promise.all([
+    ...backup.products.map((product) => transaction.objectStore('products').put(product)),
+    ...backup.events.map((event) => transaction.objectStore('events').put(event)),
+    transaction.done,
+  ])
+}
+
 export async function resetDatabaseForTests(): Promise<void> {
   if (databasePromise) {
     ;(await databasePromise).close()
