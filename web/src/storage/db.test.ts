@@ -1,7 +1,19 @@
 import { beforeEach, describe, expect, test } from 'vitest'
+import { openDB } from 'idb'
 
-import { resetDatabaseForTests, deactivateProduct, importBackup, listEvents, listProducts, saveEvent, saveProduct } from './db'
-import type { ConsumptionEvent, Product } from '../domain/types'
+import {
+  deactivateProduct,
+  deleteCraving,
+  importBackup,
+  listCravings,
+  listEvents,
+  listProducts,
+  resetDatabaseForTests,
+  saveCraving,
+  saveEvent,
+  saveProduct,
+} from './db'
+import type { ConsumptionEvent, CravingEvent, Product } from '../domain/types'
 
 const timestamp = '2026-08-20T08:00:00.000Z'
 
@@ -12,6 +24,10 @@ const product: Product = {
 
 function event(id: string, occurredAt: string): ConsumptionEvent {
   return { id, productId: product.id, category: 'cigarette', quantity: 1, occurredAt, createdAt: timestamp, updatedAt: timestamp }
+}
+
+function craving(id: string, occurredAt: string): CravingEvent {
+  return { id, tagId: 'addiction', occurredAt, createdAt: occurredAt, updatedAt: occurredAt }
 }
 
 describe('IndexedDB journal', () => {
@@ -37,9 +53,44 @@ describe('IndexedDB journal', () => {
 
   test('imports a validated backup as upserts without deleting local data', async () => {
     await saveProduct({ ...product, id: 'local', name: 'Локальний' })
-    await importBackup({ products: [product], events: [event('imported', timestamp)] })
+    await saveCraving(craving('local-craving', '2026-08-20T07:00:00.000Z'))
+    await importBackup({
+      products: [product],
+      events: [event('imported', timestamp)],
+      cravings: [craving('imported-craving', '2026-08-20T09:00:00.000Z')],
+    })
 
     expect((await listProducts({ includeInactive: true }).then((items) => items.map((item) => item.id)))).toEqual(['local', 'parliament'])
     expect((await listEvents()).map((item) => item.id)).toEqual(['imported'])
+    expect((await listCravings()).map((item) => item.id)).toEqual(['imported-craving', 'local-craving'])
+  })
+
+  test('saves unresolved cravings newest first and deletes only the selected craving', async () => {
+    await saveCraving(craving('older', '2026-08-20T08:00:00.000Z'))
+    await saveCraving(craving('newer', '2026-08-20T10:00:00.000Z'))
+
+    expect((await listCravings()).map((item) => item.id)).toEqual(['newer', 'older'])
+    expect((await listCravings())[0].outcome).toBeUndefined()
+
+    await deleteCraving('older')
+    expect((await listCravings()).map((item) => item.id)).toEqual(['newer'])
+  })
+
+  test('upgrades a version-one database without changing existing products or events', async () => {
+    const legacyDb = await openDB('nicotine-tracker', 1, {
+      upgrade(db) {
+        db.createObjectStore('products', { keyPath: 'id' })
+        const events = db.createObjectStore('events', { keyPath: 'id' })
+        events.createIndex('by-occurred-at', 'occurredAt')
+        events.createIndex('by-product-id', 'productId')
+      },
+    })
+    await legacyDb.put('products', product)
+    await legacyDb.put('events', event('legacy-event', timestamp))
+    legacyDb.close()
+
+    expect((await listProducts({ includeInactive: true })).map((item) => item.id)).toEqual(['parliament'])
+    expect((await listEvents()).map((item) => item.id)).toEqual(['legacy-event'])
+    expect(await listCravings()).toEqual([])
   })
 })

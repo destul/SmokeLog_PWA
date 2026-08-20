@@ -4,7 +4,58 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import App from '../App'
-import { resetDatabaseForTests } from '../storage/db'
+import { resetDatabaseForTests, saveEvent, saveProduct } from '../storage/db'
+import type { Category, ConsumptionEvent, Product } from '../domain/types'
+
+function savedProduct(
+  id: string,
+  overrides: Partial<Product> = {},
+): Product {
+  const timestamp = '2026-08-20T08:00:00.000Z'
+  return {
+    id,
+    category: 'cigarette',
+    name: id,
+    active: true,
+    packagePriceMinor: 11_000,
+    unitsPerPackage: 20,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  }
+}
+
+function savedEvent(
+  id: string,
+  productId: string,
+  category: Category,
+  occurredAt: string,
+): ConsumptionEvent {
+  return {
+    id,
+    productId,
+    category,
+    quantity: 1,
+    occurredAt,
+    createdAt: occurredAt,
+    updatedAt: occurredAt,
+  }
+}
+
+async function seedSevenDays(product: Product): Promise<void> {
+  await saveProduct(product)
+  const today = new Date()
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const occurredAt = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate() - offset,
+      8,
+      0,
+    ).toISOString()
+    await saveEvent(savedEvent(`event-${offset}`, product.id, product.category, occurredAt))
+  }
+}
 
 describe('App', () => {
   afterEach(cleanup)
@@ -49,7 +100,7 @@ describe('App', () => {
     await user.clear(screen.getByLabelText('Ціна пачки'))
     await user.type(screen.getByLabelText('Ціна пачки'), '110')
     await user.click(screen.getByRole('button', { name: 'Зберегти продукт' }))
-    await user.click(await screen.findByRole('button', { name: 'Додати 1 сигарету' }))
+    await user.click(await screen.findByRole('button', { name: /Parliament · \+1 сигарету/ }))
 
     expect(await screen.findByText('1 шт.')).toBeTruthy()
     expect(screen.getByText('5,50 ₴')).toBeTruthy()
@@ -63,7 +114,7 @@ describe('App', () => {
     await user.type(screen.getByLabelText('Назва продукту'), 'Одноразка')
     expect(screen.queryByLabelText('Ціна пачки')).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Зберегти продукт' }))
-    await user.click(await screen.findByRole('button', { name: 'Додати затяжки' }))
+    await user.click(await screen.findByRole('button', { name: /Одноразка · \+1 затяжку/ }))
 
     expect(await screen.findByText(/1\s+затяжка/)).toBeTruthy()
     expect(screen.getByText('0,00 ₴')).toBeTruthy()
@@ -77,7 +128,7 @@ describe('App', () => {
     await user.clear(screen.getByLabelText('Ціна пачки'))
     await user.type(screen.getByLabelText('Ціна пачки'), '110')
     await user.click(screen.getByRole('button', { name: 'Зберегти продукт' }))
-    await user.click(await screen.findByRole('button', { name: 'Додати 1 сигарету' }))
+    await user.click(await screen.findByRole('button', { name: /Parliament · \+1 сигарету/ }))
 
     await user.click(await screen.findByRole('button', { name: 'Редагувати Parliament' }))
     fireEvent.change(screen.getByLabelText('Дата й час'), { target: { value: '2026-08-19T09:30' } })
@@ -100,7 +151,7 @@ describe('App', () => {
     await user.clear(screen.getByLabelText('Ціна пачки'))
     await user.type(screen.getByLabelText('Ціна пачки'), '110')
     await user.click(screen.getByRole('button', { name: 'Зберегти продукт' }))
-    await user.click(await screen.findByRole('button', { name: 'Додати 1 сигарету' }))
+    await user.click(await screen.findByRole('button', { name: /Parliament · \+1 сигарету/ }))
     await user.click(screen.getByRole('tab', { name: 'Тиждень' }))
 
     expect(await screen.findAllByTestId('week-day')).toHaveLength(7)
@@ -116,7 +167,7 @@ describe('App', () => {
     await user.clear(screen.getByLabelText('Ціна пачки'))
     await user.type(screen.getByLabelText('Ціна пачки'), '110')
     await user.click(screen.getByRole('button', { name: 'Зберегти продукт' }))
-    await user.click(await screen.findByRole('button', { name: 'Додати 1 сигарету' }))
+    await user.click(await screen.findByRole('button', { name: /Parliament · \+1 сигарету/ }))
     await user.click(screen.getByRole('tab', { name: 'Налаштування' }))
     await user.click(await screen.findByRole('button', { name: 'Приховати Parliament' }))
 
@@ -133,5 +184,81 @@ describe('App', () => {
 
     expect(screen.getByRole('button', { name: 'Експортувати JSON' })).toBeTruthy()
     expect(screen.getByLabelText('Імпортувати JSON')).toBeTruthy()
+  })
+
+  test('shows no more than three named quick product buttons and opens all products', async () => {
+    const products = [
+      savedProduct('LM синій'),
+      savedProduct('LM 100 мм'),
+      savedProduct('HEETS Bronze', { category: 'stick' }),
+      savedProduct('Parliament'),
+    ]
+    for (const [index, product] of products.entries()) {
+      await saveProduct(product)
+      await saveEvent(
+        savedEvent(
+          `event-${index}`,
+          product.id,
+          product.category,
+          new Date(Date.now() - index * 60_000).toISOString(),
+        ),
+      )
+    }
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(await screen.findAllByTestId('quick-product')).toHaveLength(3)
+    expect(screen.getByRole('button', { name: /LM синій · \+1 сигарету/ })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Усі продукти' }))
+    expect(screen.getByRole('dialog', { name: 'Усі продукти' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Parliament · \+1 сигарету/ })).toBeTruthy()
+  })
+
+  test('records a craving without changing consumption and resolves it as resisted', async () => {
+    await saveProduct(savedProduct('Parliament'))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Тягне курити' }))
+    await user.click(screen.getByRole('button', { name: 'Просто тягне / залежність' }))
+
+    expect(await screen.findByText('Тягу записано.')).toBeTruthy()
+    expect(screen.getByText('0 шт.')).toBeTruthy()
+    await user.click(await screen.findByRole('button', { name: 'Переждав' }))
+    expect(await screen.findByText('Переждав')).toBeTruthy()
+  })
+
+  test('shows a month or quarter forecast and the seven-minute estimate after seven days', async () => {
+    await seedSevenDays(savedProduct('Parliament'))
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(await screen.findByTestId('money-forecast')).toHaveTextContent('За такого темпу')
+    expect(screen.getByText('Оцінка: 7 хв на сигарету або стік.')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Квартал' }))
+    expect(screen.getByTestId('money-forecast')).toHaveTextContent('90 днів')
+  })
+
+  test('shows an unavailable forecast before seven observed days', async () => {
+    await saveProduct(savedProduct('Parliament'))
+    render(<App />)
+
+    expect(
+      await screen.findByText('Прогноз з’явиться після 7 днів обліку.'),
+    ).toBeTruthy()
+  })
+
+  test('opens product-specific health details with a source link', async () => {
+    await saveProduct(savedProduct('Старий снюс', { category: 'snus' }))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Про здоров’я' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Про здоров’я' })
+    expect(dialog).toHaveTextContent('Нікотин і залежність')
+    expect(dialog).not.toHaveTextContent('спричиняють рак')
+    expect(screen.getByRole('link', { name: 'Джерело' })).toHaveAttribute('href', expect.stringMatching(/^https:\/\/www\.cdc\.gov\//))
   })
 })
