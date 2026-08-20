@@ -1,4 +1,8 @@
+import type { TriggerTagId } from './tags'
+
 export type Category = 'cigarette' | 'stick' | 'vape' | 'snus'
+export type SnusKind = 'tobacco' | 'nicotine-pouch'
+export type CravingOutcome = 'smoked' | 'resisted'
 
 export type Product = {
   id: string
@@ -7,6 +11,7 @@ export type Product = {
   active: boolean
   packagePriceMinor?: number
   unitsPerPackage?: number
+  snusKind?: SnusKind
   createdAt: string
   updatedAt: string
 }
@@ -18,6 +23,17 @@ export type ConsumptionEvent = {
   quantity: number
   tagId?: string
   occurredAt: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type CravingEvent = {
+  id: string
+  tagId: TriggerTagId
+  customReason?: string
+  outcome?: CravingOutcome
+  occurredAt: string
+  resolvedAt?: string
   createdAt: string
   updatedAt: string
 }
