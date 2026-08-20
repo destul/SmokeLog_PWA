@@ -1,3 +1,21 @@
+export function latestPastEvent<T extends { occurredAt: string }>(
+  events: T[],
+  now = new Date(),
+): T | undefined {
+  const nowMs = now.getTime()
+  let latest: T | undefined
+  let latestMs = Number.NEGATIVE_INFINITY
+
+  for (const event of events) {
+    const occurredAtMs = new Date(event.occurredAt).getTime()
+    if (!Number.isFinite(occurredAtMs) || occurredAtMs > nowMs || occurredAtMs <= latestMs) continue
+    latest = event
+    latestMs = occurredAtMs
+  }
+
+  return latest
+}
+
 export function formatElapsedSince(occurredAt: string, now = new Date()): string {
   const then = new Date(occurredAt).getTime()
   const minutes = Math.max(0, Math.floor((now.getTime() - then) / 60_000))

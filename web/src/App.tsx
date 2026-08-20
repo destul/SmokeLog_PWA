@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { summarizeWeekAnalytics } from './domain/analytics'
 import { contextualPrompt, forecastForPeriod, summarizeAwareness } from './domain/awareness'
 import { localDayKey, sevenDayKeys } from './domain/dates'
-import { formatElapsedSince } from './domain/elapsed'
+import { formatElapsedSince, latestPastEvent } from './domain/elapsed'
 import { healthInsightForProduct } from './domain/health'
 import { recentQuickProducts } from './domain/quick-products'
 import { summarizeEvents } from './domain/statistics'
@@ -178,7 +178,7 @@ function App() {
     () => forecastForPeriod(events, productsById, now, forecastPeriod),
     [events, forecastPeriod, now, productsById],
   )
-  const lastEvent = events[0]
+  const lastEvent = latestPastEvent(events, now)
   const healthProduct = lastEvent
     ? productsById.get(lastEvent.productId)
     : [...activeProducts].sort((left, right) =>
