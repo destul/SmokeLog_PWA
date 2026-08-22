@@ -12,3 +12,20 @@ export function sevenDayKeys(now: Date): string[] {
     return localDayKey(day)
   })
 }
+
+export function localDateTimeInputToIso(value: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return null
+
+  const [, year, month, day, hour, minute] = match
+  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), 0, 0)
+  if (
+    date.getFullYear() !== Number(year) ||
+    date.getMonth() !== Number(month) - 1 ||
+    date.getDate() !== Number(day) ||
+    date.getHours() !== Number(hour) ||
+    date.getMinutes() !== Number(minute)
+  ) return null
+
+  return date.toISOString()
+}

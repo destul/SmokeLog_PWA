@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'vitest'
 
-import { contextualPrompt, forecastForPeriod, summarizeAwareness } from './awareness'
+import {
+  contextualPrompt,
+  forecastForPeriod,
+  longestConsumptionPause,
+  savingsProgress,
+  summarizeAwareness,
+} from './awareness'
 import type { ConsumptionEvent, CravingEvent, Product } from './types'
 
 const now = new Date(2026, 7, 20, 12, 0)
@@ -131,4 +137,34 @@ describe('summarizeAwareness', () => {
 
 test('uses a calm contextual prompt without promising recovery', () => {
   expect(contextualPrompt('addiction')).toBe('Тяга — це сигнал залежності, а не наказ діяти.')
+})
+
+test('finds the longest pause between consumption entries', () => {
+  const events = [
+    consumption(18, { occurredAt: new Date(2026, 7, 18, 8, 0).toISOString() }),
+    consumption(18, { id: 'event-18-evening', occurredAt: new Date(2026, 7, 18, 20, 30).toISOString() }),
+    consumption(19, { id: 'event-19-morning', occurredAt: new Date(2026, 7, 19, 9, 30).toISOString() }),
+  ]
+
+  expect(longestConsumptionPause(events)).toEqual({
+    minutes: 780,
+    from: events[1].occurredAt,
+    to: events[2].occurredAt,
+  })
+})
+
+test('calculates savings against a seven-day personal baseline', () => {
+  const products = new Map([['cigarette', product('cigarette')]])
+  const events = [13, 14, 15, 16, 17, 18, 19].flatMap((day) => [
+    consumption(day, { id: `baseline-${day}-1` }),
+    consumption(day, { id: `baseline-${day}-2` }),
+  ])
+  events.push(consumption(20, { id: 'today-only' }))
+
+  expect(savingsProgress(events, products, now, 5_000)).toEqual({
+    goalMinor: 5_000,
+    savedMinor: 550,
+    progressPercent: 11,
+    baselineDailyCostMinor: 1_100,
+  })
 })

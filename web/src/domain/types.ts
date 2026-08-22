@@ -12,8 +12,15 @@ export type Product = {
   packagePriceMinor?: number
   unitsPerPackage?: number
   snusKind?: SnusKind
+  priceHistory?: readonly ProductPricePoint[]
   createdAt: string
   updatedAt: string
+}
+
+export type ProductPricePoint = {
+  packagePriceMinor: number
+  unitsPerPackage: number
+  recordedAt: string
 }
 
 export type ConsumptionEvent = {

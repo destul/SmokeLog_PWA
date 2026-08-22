@@ -6,6 +6,7 @@ import type {
   CravingOutcome,
   Product,
   SnusKind,
+  ProductPricePoint,
 } from '../domain/types'
 
 const categories: Category[] = ['cigarette', 'stick', 'vape', 'snus']
@@ -49,6 +50,13 @@ function isSnusKind(value: unknown): value is SnusKind {
   return value === 'tobacco' || value === 'nicotine-pouch'
 }
 
+function isPricePoint(value: unknown): value is ProductPricePoint {
+  return isRecord(value) &&
+    Number.isInteger(value.packagePriceMinor) && (value.packagePriceMinor as number) > 0 &&
+    Number.isInteger(value.unitsPerPackage) && (value.unitsPerPackage as number) > 0 &&
+    isIsoDate(value.recordedAt)
+}
+
 function isCravingOutcome(value: unknown): value is CravingOutcome {
   return value === 'smoked' || value === 'resisted'
 }
@@ -56,6 +64,7 @@ function isCravingOutcome(value: unknown): value is CravingOutcome {
 function isProduct(value: unknown): value is Product {
   if (!isRecord(value) || typeof value.id !== 'string' || !value.id || typeof value.name !== 'string' || !value.name || !isCategory(value.category) || typeof value.active !== 'boolean' || !isIsoDate(value.createdAt) || !isIsoDate(value.updatedAt)) return false
   if (value.snusKind !== undefined && (value.category !== 'snus' || !isSnusKind(value.snusKind))) return false
+  if (value.priceHistory !== undefined && (!Array.isArray(value.priceHistory) || !value.priceHistory.every(isPricePoint))) return false
   if (value.category === 'vape') return value.packagePriceMinor === undefined && value.unitsPerPackage === undefined
   return Number.isInteger(value.packagePriceMinor) && (value.packagePriceMinor as number) > 0 && Number.isInteger(value.unitsPerPackage) && (value.unitsPerPackage as number) > 0
 }

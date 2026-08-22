@@ -7,6 +7,15 @@ export type WeekAnalytics = {
   tags: Array<{ id: string; quantity: number }>
 }
 
+export function summarizeDayHours(events: ConsumptionEvent[], dayKey: string): number[] {
+  const hours = Array.from({ length: 24 }, () => 0)
+  for (const event of events) {
+    const occurredAt = new Date(event.occurredAt)
+    if (localDayKey(occurredAt) === dayKey) hours[occurredAt.getHours()] += event.quantity
+  }
+  return hours
+}
+
 export function summarizeWeekAnalytics(events: ConsumptionEvent[], dayKeys: string[]): WeekAnalytics {
   const daily = new Map(dayKeys.map((key) => [key, 0]))
   const hours = Array.from({ length: 24 }, () => 0)
