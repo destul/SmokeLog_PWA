@@ -98,3 +98,72 @@ const contextualPrompts: Record<TriggerTagId, string> = {
 export function contextualPrompt(tagId: TriggerTagId): string {
   return contextualPrompts[tagId]
 }
+
+export type PauseSummary = {
+  minutes: number
+  from: string
+  to: string
+}
+
+export function longestConsumptionPause(events: ConsumptionEvent[]): PauseSummary | null {
+  const ordered = events
+    .filter((event) => !Number.isNaN(new Date(event.occurredAt).getTime()))
+    .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))
+  let longest: PauseSummary | null = null
+
+  for (let index = 1; index < ordered.length; index += 1) {
+    const from = ordered[index - 1].occurredAt
+    const to = ordered[index].occurredAt
+    const minutes = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 60_000)
+    if (!longest || minutes > longest.minutes) longest = { minutes, from, to }
+  }
+
+  return longest
+}
+
+export type SavingsProgress = {
+  goalMinor: number
+  savedMinor: number
+  progressPercent: number
+  baselineDailyCostMinor: number
+}
+
+export function savingsProgress(
+  events: ConsumptionEvent[],
+  products: Map<string, Product>,
+  now: Date,
+  goalMinor: number,
+): SavingsProgress | null {
+  const priorDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (index + 1))
+    return localDayKey(date)
+  })
+  const priorDailyCosts = priorDays.map((dayKey) => summarizeEventsForDay(events, products, dayKey))
+  if (priorDailyCosts.some((cost) => cost === 0)) return null
+
+  const baselineDailyCostMinor = Math.round(
+    priorDailyCosts.reduce((total, cost) => total + cost, 0) / priorDailyCosts.length,
+  )
+  const todayCostMinor = summarizeEventsForDay(events, products, localDayKey(now))
+  const savedMinor = Math.max(0, baselineDailyCostMinor - todayCostMinor)
+  return {
+    goalMinor,
+    savedMinor,
+    progressPercent: goalMinor > 0 ? Math.min(100, Math.round((savedMinor / goalMinor) * 100)) : 0,
+    baselineDailyCostMinor,
+  }
+}
+
+function summarizeEventsForDay(
+  events: ConsumptionEvent[],
+  products: Map<string, Product>,
+  dayKey: string,
+): number {
+  return events
+    .filter((event) => localDayKey(new Date(event.occurredAt)) === dayKey)
+    .reduce((total, event) => {
+      const product = products.get(event.productId)
+      if (!product?.packagePriceMinor || !product.unitsPerPackage) return total
+      return total + Math.round((event.quantity * product.packagePriceMinor) / product.unitsPerPackage)
+    }, 0)
+}

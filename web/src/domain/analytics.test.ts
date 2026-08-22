@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import { summarizeWeekAnalytics } from './analytics'
+import { summarizeDayHours, summarizeWeekAnalytics } from './analytics'
 import type { ConsumptionEvent } from './types'
 
 function event(overrides: Partial<ConsumptionEvent>): ConsumptionEvent {
@@ -48,4 +48,20 @@ describe('summarizeWeekAnalytics', () => {
       { id: 'untagged', quantity: 1 },
     ])
   })
+})
+
+test('summarizes hourly consumption for one local calendar day only', () => {
+  const result = summarizeDayHours(
+    [
+      event({ id: 'yesterday', occurredAt: localIso(20, 23), quantity: 3 }),
+      event({ id: 'today-morning', occurredAt: localIso(21, 9), quantity: 2 }),
+      event({ id: 'today-evening', occurredAt: localIso(21, 20), quantity: 1 }),
+    ],
+    '2026-08-21',
+  )
+
+  expect(result[23]).toBe(0)
+  expect(result[9]).toBe(2)
+  expect(result[20]).toBe(1)
+  expect(result.reduce((total, quantity) => total + quantity, 0)).toBe(3)
 })

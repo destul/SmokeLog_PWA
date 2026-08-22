@@ -8,6 +8,11 @@ const product = {
   createdAt: '2026-08-20T08:00:00.000Z', updatedAt: '2026-08-20T08:00:00.000Z',
 } as const
 
+const productWithPriceHistory = {
+  ...product,
+  priceHistory: [{ packagePriceMinor: 10_000, unitsPerPackage: 20, recordedAt: '2026-08-01T08:00:00.000Z' }],
+} as const
+
 const event = {
   id: 'event-1', productId: 'parliament', category: 'cigarette', quantity: 1, tagId: 'coffee',
   occurredAt: '2026-08-20T08:00:00.000Z', createdAt: '2026-08-20T08:00:00.000Z', updatedAt: '2026-08-20T08:00:00.000Z',
@@ -20,6 +25,12 @@ const craving = {
 } as const
 
 describe('backup format', () => {
+  test('preserves product price history', () => {
+    const backup = createBackup([productWithPriceHistory], [event], [], '2026-08-20T10:00:00.000Z')
+
+    expect(parseBackup(JSON.stringify(backup)).products[0].priceHistory).toEqual(productWithPriceHistory.priceHistory)
+  })
+
   test('round-trips products, events, and cravings in version two', () => {
     const backup = createBackup([product], [event], [craving], '2026-08-20T10:00:00.000Z')
 

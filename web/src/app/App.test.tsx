@@ -62,6 +62,7 @@ describe('App', () => {
 
   beforeEach(async () => {
     await resetDatabaseForTests()
+    localStorage.clear()
   })
 
   test('renders the daily tracker heading', () => {
@@ -227,6 +228,69 @@ describe('App', () => {
     expect(screen.getByText('0 шт.')).toBeTruthy()
     await user.click(await screen.findByRole('button', { name: 'Переждав' }))
     expect(await screen.findByText('Переждав')).toBeTruthy()
+  })
+
+  test('records a consumption event at the craving time after smoked outcome', async () => {
+    await saveProduct(savedProduct('Parliament'))
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: 'Тягне курити' }))
+    await user.click(screen.getByRole('button', { name: 'Просто тягне / залежність' }))
+    await user.click(await screen.findByRole('button', { name: 'Закурив' }))
+    await user.click(await screen.findByRole('button', { name: 'Записати Parliament' }))
+
+    expect(await screen.findByText('Тягу записано як куріння.')).toBeTruthy()
+    expect(screen.getByText('1 шт.')).toBeTruthy()
+    expect(screen.getByText('Закурив')).toBeTruthy()
+  })
+
+  test('shows only the selected local day in the hourly chart', async () => {
+    const product = savedProduct('Parliament')
+    await saveProduct(product)
+    const today = new Date()
+    const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 23, 0).toISOString()
+    const todayMorning = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 9, 0).toISOString()
+    await saveEvent(savedEvent('yesterday', product.id, product.category, yesterday))
+    await saveEvent(savedEvent('today', product.id, product.category, todayMorning))
+
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Тиждень' }))
+
+    expect(screen.getByTestId('hour-23').querySelector('b')).toHaveTextContent('')
+    expect(screen.getByTestId('hour-9').querySelector('b')).toHaveTextContent('1')
+  })
+
+  test('configures a savings goal and notification quiet hours in settings', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Налаштування' }))
+
+    await user.type(screen.getByLabelText('Ціль на заощадження, ₴'), '5000')
+    await user.click(screen.getByRole('button', { name: 'Зберегти ціль' }))
+    await user.selectOptions(screen.getByLabelText('Тихі години від'), '23')
+    await user.selectOptions(screen.getByLabelText('до'), '7')
+
+    expect(await screen.findByText('Поточна ціль: 5 000,00 ₴')).toBeTruthy()
+    expect(screen.getByLabelText('М’які нагадування після 2 годин')).toBeChecked()
+  })
+
+  test('edits product price and keeps the previous price in history', async () => {
+    await saveProduct(savedProduct('Parliament'))
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Налаштування' }))
+    await user.click(screen.getByRole('button', { name: 'Змінити Parliament' }))
+    await user.clear(screen.getByLabelText('Ціна пачки'))
+    await user.type(screen.getByLabelText('Ціна пачки'), '120')
+    await user.click(screen.getByRole('button', { name: 'Зберегти зміни' }))
+    await user.click(screen.getByRole('tab', { name: 'Налаштування' }))
+
+    expect(await screen.findByText('Історія цін')).toBeTruthy()
+    await user.click(screen.getByText('Історія цін'))
+    expect(screen.getByText(/110,00 ₴/)).toBeTruthy()
+    expect(screen.getAllByText(/120,00 ₴/).length).toBeGreaterThanOrEqual(1)
   })
 
   test('shows a month or quarter forecast and the seven-minute estimate after seven days', async () => {
