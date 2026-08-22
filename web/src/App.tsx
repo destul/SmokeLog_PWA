@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
 import { summarizeDayHours, summarizeWeekAnalytics } from './domain/analytics'
 import { contextualPrompt, forecastForPeriod, longestConsumptionPause, savingsProgress, summarizeAwareness } from './domain/awareness'
 import { localDateTimeInputToIso, localDayKey, sevenDayKeys } from './domain/dates'
 import { formatElapsedSince, latestPastEvent } from './domain/elapsed'
 import { healthInsightForProduct } from './domain/health'
+import { filterJournalItems, journalDayLabel, summarizeJournalItems, type JournalFilters, type JournalItem } from './domain/journal'
 import { shouldSendPauseReminder } from './domain/notifications'
+import { PwaUpdateNotice } from './pwa'
 import { recentQuickProducts } from './domain/quick-products'
 import { summarizeEvents } from './domain/statistics'
 import { eventTags, triggerTags, type TriggerTagId } from './domain/tags'
@@ -134,7 +136,15 @@ function App() {
   const [goalInput, setGoalInput] = useState('')
   const [pauseReminderVisible, setPauseReminderVisible] = useState(false)
   const [now, setNow] = useState(() => new Date())
+  const [showAllJournal, setShowAllJournal] = useState(false)
+  const [journalSearch, setJournalSearch] = useState('')
+  const [journalProductId, setJournalProductId] = useState('')
+  const [journalKind, setJournalKind] = useState<JournalFilters['kind']>('all')
+  const [journalTagId, setJournalTagId] = useState('')
+  const [undoState, setUndoState] = useState<{ label: string; restore: () => Promise<void> } | null>(null)
   const isVape = category === 'vape'
+  const undoTimerRef = useRef<number | undefined>(undefined)
+  const journalScrollRef = useRef<number | null>(null)
 
   async function refresh() {
     const [nextProducts, nextEvents, nextCravings] = await Promise.all([
@@ -168,6 +178,10 @@ function App() {
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 60_000)
     return () => window.clearInterval(interval)
+  }, [])
+
+  useEffect(() => () => {
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current)
   }, [])
 
   const productsById = useMemo(() => new Map(products.map((product) => [product.id, product])), [products])
@@ -208,12 +222,21 @@ function App() {
         right.createdAt.localeCompare(left.createdAt),
       )[0]
   const healthInsight = healthInsightForProduct(healthProduct)
-  const journalItems = useMemo(
+  const journalItems = useMemo<JournalItem[]>(
     () => [
       ...events.map((event) => ({ kind: 'consumption' as const, occurredAt: event.occurredAt, event })),
       ...cravings.map((craving) => ({ kind: 'craving' as const, occurredAt: craving.occurredAt, craving })),
     ].sort((left, right) => right.occurredAt.localeCompare(left.occurredAt)),
     [cravings, events],
+  )
+  const filteredJournalItems = useMemo(
+    () => filterJournalItems(journalItems, { search: journalSearch, productId: journalProductId, kind: journalKind, tagId: journalTagId }, productsById),
+    [journalItems, journalKind, journalProductId, journalSearch, journalTagId, productsById],
+  )
+  const visibleJournalItems = showAllJournal ? filteredJournalItems : filteredJournalItems.slice(0, 20)
+  const journalSummary = useMemo(
+    () => summarizeJournalItems(filteredJournalItems, productsById),
+    [filteredJournalItems, productsById],
   )
 
   function resetReminderForLatestEvent(occurredAt: string) {
@@ -281,9 +304,27 @@ function App() {
 
   async function addOne(product: Product) {
     const createdAt = new Date().toISOString()
-    await saveEvent({ id: crypto.randomUUID(), productId: product.id, category: product.category, quantity: 1, occurredAt: createdAt, createdAt, updatedAt: createdAt })
+    const event: ConsumptionEvent = { id: crypto.randomUUID(), productId: product.id, category: product.category, quantity: 1, occurredAt: createdAt, createdAt, updatedAt: createdAt }
+    await saveEvent(event)
     resetReminderForLatestEvent(createdAt)
     setAllProductsOpen(false)
+    scheduleUndo('Запис додано.', async () => deleteEvent(event.id))
+    await refresh()
+  }
+
+  function scheduleUndo(label: string, restore: () => Promise<void>) {
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current)
+    setUndoState({ label, restore })
+    undoTimerRef.current = window.setTimeout(() => setUndoState(null), 8_000)
+  }
+
+  async function undoLatest() {
+    if (!undoState) return
+    const restore = undoState.restore
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current)
+    setUndoState(null)
+    await restore()
+    setNotice('Дію скасовано.')
     await refresh()
   }
 
@@ -360,12 +401,29 @@ function App() {
   }
 
   function openEditEvent(event: ConsumptionEvent) {
+    journalScrollRef.current = window.scrollY
     setEventEditorOpen(true)
     setEditingEvent(event)
     setEventProductId(event.productId)
     setEventQuantity(String(event.quantity))
     setEventDate(toLocalInputValue(event.occurredAt))
     setEventTagId(event.tagId ?? '')
+    setNotice('')
+  }
+
+  function openPreviousEvent() {
+    const previous = journalItems.find((item): item is Extract<JournalItem, { kind: 'consumption' }> => item.kind === 'consumption')
+    if (!previous) {
+      openNewEvent()
+      return
+    }
+    journalScrollRef.current = window.scrollY
+    setEventEditorOpen(true)
+    setEditingEvent(null)
+    setEventProductId(previous.event.productId)
+    setEventQuantity(String(previous.event.quantity))
+    setEventDate(toLocalInputValue(previous.event.occurredAt))
+    setEventTagId(previous.event.tagId ?? '')
     setNotice('')
   }
 
@@ -398,13 +456,20 @@ function App() {
     setEventEditorOpen(false)
     setNotice(editingEvent ? 'Запис змінено.' : 'Запис додано.')
     await refresh()
+    if (journalScrollRef.current !== null) {
+      const scrollTop = journalScrollRef.current
+      journalScrollRef.current = null
+      requestAnimationFrame(() => window.scrollTo({ top: scrollTop }))
+    }
   }
 
   async function confirmDelete() {
     if (!pendingDelete) return
-    await deleteEvent(pendingDelete.id)
+    const deletedEvent = pendingDelete
+    await deleteEvent(deletedEvent.id)
     setPendingDelete(null)
     setNotice('Запис видалено.')
+    scheduleUndo('Запис видалено.', async () => saveEvent(deletedEvent))
     await refresh()
   }
 
@@ -473,7 +538,8 @@ function App() {
     <main className="tracker">
       <header><p>Приватний облік · лише на цьому пристрої</p><h1>{tab === 'today' ? 'Сьогодні' : tab === 'week' ? 'Тиждень' : 'Налаштування'}</h1></header>
       <nav className="tabs" aria-label="Розділи"><button type="button" role="tab" aria-selected={tab === 'today'} onClick={() => setTab('today')}>Сьогодні</button><button type="button" role="tab" aria-selected={tab === 'week'} onClick={() => setTab('week')}>Тиждень</button><button type="button" role="tab" aria-selected={tab === 'settings'} onClick={() => setTab('settings')}>Налаштування</button></nav>
-      {notice && <p role="status" className="notice">{notice}</p>}
+      {notice && <p role="status" className="notice">{notice}{undoState && <button type="button" className="text-button undo-button" onClick={() => void undoLatest()}>Скасувати</button>}</p>}
+      <PwaUpdateNotice />
       {pauseReminderVisible && <section className="pause-reminder" role="alert"><strong>Ти кинув курити?</strong><p>Продовжуй у тому ж дусі. Якщо це була просто пауза — нічого не потрібно додавати.</p><div className="form-actions"><button type="button" onClick={() => { setPauseReminderVisible(false); setEventEditorOpen(true); openNewEvent() }}>Відмітити зараз</button><button type="button" className="text-button" onClick={() => setPauseReminderVisible(false)}>Це була пауза</button></div></section>}
       {tab === 'today' && <>
         <section className="interval-card"><span>З останнього разу</span>{lastEvent ? <><strong>{formatElapsedSince(lastEvent.occurredAt, now)}</strong><small>{formatEventDate(lastEvent.occurredAt)}</small></> : <strong>Ще немає записів.</strong>}</section>
@@ -499,25 +565,45 @@ function App() {
         <section className="awareness-card" aria-label="Час і гроші"><div className="section-heading"><h2>За такого темпу</h2><div className="forecast-switch" aria-label="Період прогнозу"><button type="button" aria-pressed={forecastPeriod === 30} onClick={() => setForecastPeriod(30)}>Місяць</button><button type="button" aria-pressed={forecastPeriod === 90} onClick={() => setForecastPeriod(90)}>Квартал</button></div></div>{forecast ? <div data-testid="money-forecast"><strong>{forecast.periodDays} днів · {formatUah(forecast.costMinor)}</strong><p>За такого темпу за {forecast.periodDays === 30 ? 'місяць' : 'квартал'} піде {formatUah(forecast.costMinor)}.</p><p>Якщо не курити від сьогодні — ці гроші залишаться у тебе.</p><p className="forecast-estimate">≈ {formatMinutes(forecast.estimatedMinutes)} на перекури</p><small>Оцінка: 7 хв на сигарету або стік.</small></div> : <p className="muted">Прогноз з’явиться після 7 днів обліку.</p>}</section>
         <button type="button" className="health-card" aria-label="Про здоров’я" onClick={() => setHealthDialogOpen(true)}><span>Факт про здоров’я</span><strong>{healthInsight.title}</strong><small>{healthInsight.summary}</small></button>
         {contextMessage && <p className="context-prompt">{contextMessage}</p>}
-        <section><h2>Останні записи</h2>{todayEvents.length === 0 && cravings.length === 0 ? <p>Ще нічого не додано.</p> : null}{journalItems.length === 0 ? <p>Журнал порожній.</p> : <ul className="event-list">{journalItems.map((item) => {
-          if (item.kind === 'craving') {
-            const craving = item.craving
-            const tag = triggerTags.find((candidate) => candidate.id === craving.tagId)
-            const canChooseOutcome = !craving.outcome || editingCravingId === craving.id
-            return <li key={`craving-${craving.id}`} className="craving-row"><div><strong>Тяга · {craving.customReason || tag?.label}</strong><span>{formatEventDate(craving.occurredAt)}</span>{craving.outcome && editingCravingId !== craving.id && <em className="craving-outcome">{cravingOutcomeLabel(craving.outcome)}</em>}</div><div className="event-actions">{smokedCravingId === craving.id ? <div className="craving-product-choice"><small>Який продукт записати?</small>{activeProducts.map((product) => <button key={product.id} type="button" className="text-button" aria-label={`Записати ${product.name}`} onClick={() => void recordSmokedCraving(craving, product)}>{product.name}</button>)}</div> : canChooseOutcome ? <><button type="button" className="text-button" onClick={() => void resolveCraving(craving, 'smoked')}>Закурив</button><button type="button" className="text-button" onClick={() => void resolveCraving(craving, 'resisted')}>Переждав</button></> : <button type="button" className="text-button" aria-label="Змінити результат" onClick={() => setEditingCravingId(craving.id)}>Змінити результат</button>}</div></li>
-          }
-          const event = item.event
-          const product = productsById.get(event.productId)
-          const productName = product?.name ?? 'Прихований продукт'
-          const label = tagLabel(event.tagId)
-          return <li key={event.id}><div><strong>{productName}</strong><span>{event.quantity} {event.category === 'vape' ? 'затяжка' : 'шт.'} · {formatEventDate(event.occurredAt)}</span>{label && <em className="event-tag">{label}</em>}</div><div className="event-actions"><button type="button" className="text-button" aria-label={`Редагувати ${productName}`} onClick={() => openEditEvent(event)}>Редагувати</button><button type="button" className="danger-button" aria-label={`Видалити ${productName}`} onClick={() => setPendingDelete(event)}>Видалити</button></div></li>
-        })}</ul>}</section>
+        <section>
+          <div className="section-heading"><h2>Останні записи</h2></div>
+          {todayEvents.length === 0 && cravings.length === 0 ? <p>Ще нічого не додано.</p> : null}
+          {journalItems.length === 0 ? <p>Журнал порожній.</p> : <>
+            {showAllJournal && <div className="journal-toolbar">
+              <button type="button" className="text-button" onClick={openPreviousEvent}>Додати попередню</button>
+              <label>Пошук у журналі<input aria-label="Пошук у журналі" value={journalSearch} onChange={(event) => setJournalSearch(event.target.value)} placeholder="Продукт або причина" /></label>
+              <div className="journal-filter-grid">
+                <label>Продукт<select aria-label="Фільтр за продуктом" value={journalProductId} onChange={(event) => setJournalProductId(event.target.value)}><option value="">Усі продукти</option>{products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label>
+                <label>Тип<select aria-label="Тип запису" value={journalKind} onChange={(event) => setJournalKind(event.target.value as JournalFilters['kind'])}><option value="all">Усі записи</option><option value="consumption">Куріння</option><option value="craving">Тяга</option></select></label>
+                <label>Причина<select aria-label="Причина / ситуація" value={journalTagId} onChange={(event) => setJournalTagId(event.target.value)}><option value="">Усі причини</option>{triggerTags.map((tag) => <option key={tag.id} value={tag.id}>{tag.label}</option>)}</select></label>
+              </div>
+              <p className="journal-summary" data-testid="journal-summary">Відображено: {filteredJournalItems.length} записів · {journalSummary.consumptionQuantity} шт. · {journalSummary.cravingCount} тяг</p>
+            </div>}
+            {filteredJournalItems.length === 0 ? <p className="muted">За цими фільтрами нічого не знайдено.</p> : <ul className="event-list">{visibleJournalItems.map((item, index) => {
+              const previousItem = visibleJournalItems[index - 1]
+              const daySeparator = showAllJournal && (!previousItem || journalDayLabel(previousItem.occurredAt, now) !== journalDayLabel(item.occurredAt, now))
+              const separator = daySeparator ? <li className="journal-day-separator" key={`day-${item.occurredAt}`}><h3>{journalDayLabel(item.occurredAt, now)}</h3></li> : null
+              if (item.kind === 'craving') {
+                const craving = item.craving
+                const tag = triggerTags.find((candidate) => candidate.id === craving.tagId)
+                const canChooseOutcome = !craving.outcome || editingCravingId === craving.id
+                return <Fragment key={`craving-${craving.id}`}>{separator}<li className="craving-row"><div><strong>Тяга · {craving.customReason || tag?.label}</strong><span>{formatEventDate(craving.occurredAt)}</span>{craving.outcome && editingCravingId !== craving.id && <em className="craving-outcome">{cravingOutcomeLabel(craving.outcome)}</em>}</div><div className="event-actions">{smokedCravingId === craving.id ? <div className="craving-product-choice"><small>Який продукт записати?</small>{activeProducts.map((product) => <button key={product.id} type="button" className="text-button" aria-label={`Записати ${product.name}`} onClick={() => void recordSmokedCraving(craving, product)}>{product.name}</button>)}</div> : canChooseOutcome ? <><button type="button" className="text-button" onClick={() => void resolveCraving(craving, 'smoked')}>Закурив</button><button type="button" className="text-button" onClick={() => void resolveCraving(craving, 'resisted')}>Переждав</button></> : <button type="button" className="text-button" aria-label="Змінити результат" onClick={() => setEditingCravingId(craving.id)}>Змінити результат</button>}</div></li></Fragment>
+              }
+              const event = item.event
+              const product = productsById.get(event.productId)
+              const productName = product?.name ?? 'Прихований продукт'
+              const label = tagLabel(event.tagId)
+              return <Fragment key={event.id}>{separator}<li><div><strong>{productName}</strong><span>{event.quantity} {event.category === 'vape' ? 'затяжка' : 'шт.'} · {formatEventDate(event.occurredAt)}</span>{label && <em className="event-tag">{label}</em>}</div><div className="event-actions"><button type="button" className="text-button" aria-label={`Редагувати ${productName}`} onClick={() => openEditEvent(event)}>Редагувати</button><button type="button" className="danger-button" aria-label={`Видалити ${productName}`} onClick={() => setPendingDelete(event)}>Видалити</button></div></li></Fragment>
+            })}</ul>}
+            {journalItems.length > 20 && <button type="button" className="text-button journal-toggle" onClick={() => { setShowAllJournal((current) => !current); if (showAllJournal) { setJournalSearch(''); setJournalProductId(''); setJournalKind('all'); setJournalTagId('') } }}>{showAllJournal ? 'Показати менше' : 'Показати всі'}</button>}
+          </>}
+        </section>
       </>}
       {tab === 'week' && <section className="week-card"><h2>Останні 7 днів</h2><div className="bar-chart" aria-label="Споживання за днями">{weekAnalytics.days.map((day) => <div className="bar-column" data-testid="week-bar" key={day.key}><span>{day.quantity || ''}</span><i style={{ height: `${(day.quantity / maxDaily) * 100}%` }} /><small>{formatDay(day.key)}</small></div>)}</div><div className="week-list">{weekAnalytics.days.map((day) => {
         const daySummary = summarizeEvents(events.filter((event) => localDayKey(new Date(event.occurredAt)) === day.key), productsById)
         return <div className="week-day" data-testid="week-day" key={day.key}><span>{formatDay(day.key)}</span><strong>{daySummary.quantity} шт.</strong><span>{formatUah(daySummary.costMinor)}</span></div>
       })}</div><div className="hour-heading"><h2 className="subheading">По годинах</h2><label>День для годин<select aria-label="День для погодинної статистики" value={analyticsDayKey} onChange={(event) => setAnalyticsDayKey(event.target.value)}>{weekKeys.map((key) => <option key={key} value={key}>{formatDay(key)}</option>)}</select></label></div><p className="muted">Показано тільки обраний день, за замовчуванням — сьогодні.</p><div className="hour-chart">{hourlyAnalytics.map((quantity, hour) => <div key={hour} data-testid={`hour-${hour}`} className={`hour-cell level-${Math.ceil((quantity / maxHourly) * 3)}`}><span>{hour}</span><b>{quantity || ''}</b></div>)}</div><h2 className="subheading">Причини / ситуації споживання</h2>{weekAnalytics.tags.length === 0 ? <p className="muted">Ще немає тегів.</p> : <ul className="tag-totals">{weekAnalytics.tags.map((tag) => <li key={tag.id}>{tagLabel(tag.id) ?? 'Без тегу'} <strong>· {tag.quantity} шт.</strong></li>)}</ul>}<section className="support-summary"><h2>Підтримка</h2>{savings ? <><p>Твоя базова лінія: {formatUah(savings.baselineDailyCostMinor)} на день.</p><p><strong>Зекономлено за сьогодні: {formatUah(savings.savedMinor)}</strong></p><progress max="100" value={savings.progressPercent} aria-label="Прогрес цілі" /><p>{savings.progressPercent}% від цілі {formatUah(savings.goalMinor)}.</p></> : <p className="muted">Встанови ціль у налаштуваннях після кількох днів обліку.</p>}{savings && summary.costMinor > savings.baselineDailyCostMinor * 1.5 && <p className="calm-prompt">Сьогодні помітно більше за твою звичну базову лінію. Це дані для спостереження, а не привід себе гризти.</p>}{longestPause && <p>Найдовша пауза: <strong>{formatPause(longestPause.minutes)}</strong>.</p>}</section><section className="craving-summary"><h2>Тяга</h2>{cravingSummary.triggers.length === 0 ? <p className="muted">Ще немає записів тяги.</p> : <ul className="tag-totals">{cravingSummary.triggers.map((trigger) => <li key={trigger.tagId}>{triggerTags.find((tag) => tag.id === trigger.tagId)?.label}<strong>· {trigger.count}</strong></li>)}</ul>}<div className="craving-outcomes"><span>Переждав · {cravingSummary.outcomes.resisted}</span><span>Закурив · {cravingSummary.outcomes.smoked}</span><span>Без результату · {cravingSummary.outcomes.unresolved}</span></div><h3>Коли тягне</h3><div className="craving-hours">{cravingSummary.byHour.map((quantity, hour) => <div key={hour} className={quantity ? 'active' : ''}><span>{hour}</span><b>{quantity || ''}</b></div>)}</div></section><div className="category-breakdown">{(Object.keys(categoryLabels) as Category[]).map((item) => <p key={item}>{categoryLabels[item]} · {summarizeEvents(weekEvents, productsById).byCategory[item].quantity} шт.</p>)}</div></section>}
-      {tab === 'settings' && <section className="settings-card"><div className="section-heading"><h2>Мої продукти</h2><button type="button" onClick={() => { setTab('today'); setEditingProduct(null); setShowProductForm(true) }}>Додати продукт</button></div>{products.length === 0 ? <p>Поки що немає продуктів.</p> : <ul className="product-list">{products.map((product) => <li key={product.id}><div><strong>{product.name}</strong><span>{categoryLabels[product.category]}{product.packagePriceMinor ? ` · ${formatUah(product.packagePriceMinor)} / ${product.unitsPerPackage} шт.` : ' · затяжки'}</span>{product.priceHistory && product.priceHistory.length > 0 && <details><summary>Історія цін</summary><ul className="price-history">{product.priceHistory.map((point) => <li key={point.recordedAt}>{formatUah(point.packagePriceMinor)} / {point.unitsPerPackage} · {formatEventDate(point.recordedAt)}</li>)}</ul></details>}</div><div className="event-actions">{product.active && <button type="button" className="text-button" aria-label={`Змінити ${product.name}`} onClick={() => openEditProduct(product)}>Змінити</button>}{product.active ? <button type="button" className="text-button" aria-label={`Приховати ${product.name}`} onClick={() => void hideProduct(product)}>Приховати</button> : <span className="hidden-product">Приховано</span>}</div></li>)}</ul>}<section className="settings-card nested-settings"><h2>Підтримка</h2><form className="goal-form" onSubmit={saveGoal}><label>Ціль на заощадження, ₴<input inputMode="decimal" value={goalInput} onChange={(event) => setGoalInput(event.target.value)} placeholder={settings.savingsGoalMinor ? String(settings.savingsGoalMinor / 100) : 'Наприклад, 5000'} /></label><button type="submit">Зберегти ціль</button></form>{settings.savingsGoalMinor !== null && <p>Поточна ціль: {formatUah(settings.savingsGoalMinor)} <button type="button" className="text-button" onClick={clearGoal}>Видалити ціль</button></p>}<label className="toggle-label"><input type="checkbox" checked={settings.notificationsEnabled} onChange={(event) => void toggleNotifications(event.target.checked)} /> М’які нагадування після 2 годин</label><div className="quiet-hours"><label>Тихі години від<select value={settings.quietHoursStart} onChange={(event) => { const next = { ...settings, quietHoursStart: Number(event.target.value) }; setSettings(next); saveSettings(next) }}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select></label><label>до<select value={settings.quietHoursEnd} onChange={(event) => { const next = { ...settings, quietHoursEnd: Number(event.target.value) }; setSettings(next); saveSettings(next) }}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select></label></div></section><section className="backup-card"><h2>Резервна копія</h2><p>Файл зберігає все тільки у тебе. Імпорт не стирає поточні записи.</p><button type="button" onClick={exportJson}>Експортувати JSON</button><label className="import-label">Імпортувати JSON<input type="file" accept="application/json,.json" onChange={(event) => void importJsonFile(event)} /></label></section><p className="settings-note">Прихований продукт не зникає з журналу і не стирає твою статистику.</p></section>}
+      {tab === 'settings' && <section className="settings-card"><div className="section-heading"><h2>Мої продукти</h2><button type="button" onClick={() => { setTab('today'); setEditingProduct(null); setShowProductForm(true) }}>Додати продукт</button></div>{products.length === 0 ? <p>Поки що немає продуктів.</p> : <ul className="product-list">{products.map((product) => <li key={product.id}><div><strong>{product.name}</strong><span>{categoryLabels[product.category]}{product.packagePriceMinor ? ` · ${formatUah(product.packagePriceMinor)} / ${product.unitsPerPackage} шт.` : ' · затяжки'}</span>{product.priceHistory && product.priceHistory.length > 0 && <details><summary>Історія цін</summary><ul className="price-history">{product.priceHistory.map((point) => <li key={point.recordedAt}>{formatUah(point.packagePriceMinor)} / {point.unitsPerPackage} · {formatEventDate(point.recordedAt)}</li>)}</ul></details>}</div><div className="event-actions">{product.active && <button type="button" className="text-button" aria-label={`Змінити ${product.name}`} onClick={() => openEditProduct(product)}>Змінити</button>}{product.active ? <button type="button" className="text-button" aria-label={`Приховати ${product.name}`} onClick={() => void hideProduct(product)}>Приховати</button> : <span className="hidden-product">Приховано</span>}</div></li>)}</ul>}<section className="settings-card nested-settings"><h2>Підтримка</h2><form className="goal-form" onSubmit={saveGoal}><label>Ціль на заощадження, ₴<input inputMode="decimal" value={goalInput} onChange={(event) => setGoalInput(event.target.value)} placeholder={settings.savingsGoalMinor ? String(settings.savingsGoalMinor / 100) : 'Наприклад, 5000'} /></label><button type="submit">Зберегти ціль</button></form>{settings.savingsGoalMinor !== null && <p>Поточна ціль: {formatUah(settings.savingsGoalMinor)} <button type="button" className="text-button" onClick={clearGoal}>Видалити ціль</button></p>}<label className="toggle-label"><input type="checkbox" checked={settings.notificationsEnabled} onChange={(event) => void toggleNotifications(event.target.checked)} /> М’які нагадування після 2 годин</label><div className="quiet-hours"><label>Тихі години від<select value={settings.quietHoursStart} onChange={(event) => { const next = { ...settings, quietHoursStart: Number(event.target.value) }; setSettings(next); saveSettings(next) }}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select></label><label>до<select value={settings.quietHoursEnd} onChange={(event) => { const next = { ...settings, quietHoursEnd: Number(event.target.value) }; setSettings(next); saveSettings(next) }}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, '0')}:00</option>)}</select></label></div></section><section className="backup-card"><h2>Резервна копія</h2><p>Файл зберігає все тільки у тебе. Імпорт не стирає поточні записи.</p><button type="button" onClick={exportJson}>Експортувати JSON</button><label className="import-label">Імпортувати JSON<input type="file" accept="application/json,.json" onChange={(event) => void importJsonFile(event)} /></label></section><p className="settings-note">Прихований продукт не зникає з журналу і не стирає твою статистику.</p><footer className="app-credit"><strong>SmokeLog</strong><span>Версія 0.3.1</span><small>Створено Віталієм за допомогою Codex</small></footer></section>}
       {allProductsOpen && <div className="dialog-backdrop" role="presentation"><section className="dialog all-products-dialog" role="dialog" aria-modal="true" aria-label="Усі продукти"><div className="section-heading"><h2>Усі продукти</h2><button type="button" className="text-button" onClick={() => setAllProductsOpen(false)}>Закрити</button></div><div className="all-products-list">{activeProducts.map((product) => <button key={product.id} type="button" aria-label={quickProductLabel(product)} onClick={() => void addOne(product)}><strong>{product.name}</strong><span>+1 {unitLabel(product.category)} · {formatUnitCost(product)}</span></button>)}</div></section></div>}
       {cravingDialogOpen && <div className="dialog-backdrop" role="presentation"><section className="dialog craving-dialog" role="dialog" aria-modal="true" aria-label="Причина тяги"><div className="section-heading"><h2>Що зараз викликало тягу?</h2><button type="button" className="text-button" onClick={() => setCravingDialogOpen(false)}>Закрити</button></div><div className="trigger-options">{triggerTags.map((tag) => <button key={tag.id} type="button" onClick={() => void recordCraving(tag.id)}><span aria-hidden="true">{tag.icon}</span>{tag.label}</button>)}</div><form className="custom-reason" onSubmit={recordCustomCraving}><label>Своя причина<input maxLength={120} value={customReason} onChange={(event) => setCustomReason(event.target.value)} /></label><button type="submit" disabled={!customReason.trim()}>Записати свою причину</button></form></section></div>}
       {healthDialogOpen && <div className="dialog-backdrop" role="presentation"><section className="dialog health-dialog" role="dialog" aria-modal="true" aria-label="Про здоров’я"><div className="section-heading"><h2>{healthInsight.title}</h2><button type="button" className="text-button" onClick={() => setHealthDialogOpen(false)}>Закрити</button></div><p>{healthInsight.body}</p><p className="health-disclaimer">Це загальна довідка, а не медичний діагноз.</p><a href={healthInsight.sourceUrl} target="_blank" rel="noreferrer">Джерело</a></section></div>}
