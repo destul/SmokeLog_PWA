@@ -297,6 +297,29 @@ describe('App', () => {
     expect(await screen.findByText('Parliament')).toBeTruthy()
   })
 
+  test('restores a hidden product from the unified change menu without changing its history', async () => {
+    const product = savedProduct('Parliament')
+    await saveProduct(product)
+    await saveEvent(savedEvent('event-1', product.id, product.category, new Date().toISOString()))
+
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Налаштування' }))
+    await user.click(await screen.findByRole('button', { name: 'Приховати Parliament' }))
+
+    expect(await screen.findByText('Приховано: Parliament')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Змінити Parliament' }))
+    await user.click(screen.getByRole('button', { name: 'Показати Parliament' }))
+
+    expect(await screen.findByText('Продукт показано.')).toBeTruthy()
+    expect((await listProducts({ includeInactive: true })).find((item) => item.id === product.id)).toMatchObject({
+      id: product.id,
+      active: true,
+    })
+    expect(await screen.findByRole('button', { name: /Parliament · \+1 сигарету/ })).toBeTruthy()
+    expect(await listEvents()).toHaveLength(1)
+  })
+
   test('offers a local JSON backup in settings', async () => {
     const user = userEvent.setup()
     render(<App />)
