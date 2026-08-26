@@ -318,6 +318,7 @@ describe('App', () => {
       id: product.id,
       active: true,
     })
+    await user.click(screen.getByRole('tab', { name: 'Сьогодні' }))
     expect(await screen.findByRole('button', { name: /Parliament · \+1 сигарету/ })).toBeTruthy()
     expect(await listEvents()).toHaveLength(1)
   })
