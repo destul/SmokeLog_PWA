@@ -1,13 +1,16 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
-import { summarizeDayHours, summarizeWeekAnalytics } from './domain/analytics'
+import { summarizeDayHours, summarizePeriodBars, summarizeWeekAnalytics } from './domain/analytics'
+import { summarizeAchievements } from './domain/achievements'
 import { contextualPrompt, forecastForPeriod, longestConsumptionPause, savingsProgress, summarizeAwareness } from './domain/awareness'
 import { localDateTimeInputToIso, localDayKey, sevenDayKeys } from './domain/dates'
+import { t } from './domain/i18n'
 import { formatElapsedSince, latestPastEvent } from './domain/elapsed'
 import { healthInsightForProduct } from './domain/health'
 import { filterJournalItems, journalDayLabel, summarizeJournalItems, type JournalFilters, type JournalItem } from './domain/journal'
 import { shouldSendPauseReminder } from './domain/notifications'
 import { PwaUpdateNotice } from './pwa'
+import './features.css'
 import { recentQuickProducts } from './domain/quick-products'
 import { summarizeEvents } from './domain/statistics'
 import { eventTags, triggerTags, type TriggerTagId } from './domain/tags'
@@ -129,12 +132,14 @@ function App() {
   const [contextMessage, setContextMessage] = useState('')
   const [editingCravingId, setEditingCravingId] = useState<string | null>(null)
   const [smokedCravingId, setSmokedCravingId] = useState<string | null>(null)
-  const [forecastPeriod, setForecastPeriod] = useState<30 | 90>(30)
+  const [forecastPeriod, setForecastPeriod] = useState<30 | 90 | 365>(30)
+  const [chartPeriod, setChartPeriod] = useState<30 | 90 | 365>(30)
   const [healthDialogOpen, setHealthDialogOpen] = useState(false)
   const [analyticsDayKey, setAnalyticsDayKey] = useState(() => localDayKey(new Date()))
   const [settings, setSettings] = useState<TrackerSettings>(() => loadSettings())
   const reminderSentEventIdRef = useRef(settings.reminderSentForEventId)
   const [goalInput, setGoalInput] = useState('')
+  const [dailyGoalInput, setDailyGoalInput] = useState('')
   const [pauseReminderVisible, setPauseReminderVisible] = useState(false)
   const [now, setNow] = useState(() => new Date())
   const [showAllJournal, setShowAllJournal] = useState(false)
@@ -205,6 +210,9 @@ function App() {
     () => summarizeAwareness(cravings, weekKeys),
     [cravings, weekKeys],
   )
+  const achievements = useMemo(() => summarizeAchievements(events, productsById, now, settings.dailyGoalQuantity), [events, now, productsById, settings.dailyGoalQuantity])
+  const periodBars = useMemo(() => summarizePeriodBars(events, now, chartPeriod), [chartPeriod, events, now])
+  const maxPeriodBar = Math.max(1, ...periodBars.map((bar) => bar.quantity))
   const forecast = useMemo(
     () => forecastForPeriod(events, productsById, now, forecastPeriod),
     [events, forecastPeriod, now, productsById],
@@ -517,6 +525,23 @@ function App() {
     setNotice('Ціль видалено.')
   }
 
+  function saveDailyGoal(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const quantity = Number(dailyGoalInput)
+    if (!Number.isInteger(quantity) || quantity <= 0) return
+    const nextSettings = { ...settings, dailyGoalQuantity: quantity }
+    setSettings(nextSettings)
+    saveSettings(nextSettings)
+    setDailyGoalInput('')
+    setNotice('Денну ціль збережено.')
+  }
+
+  function dismissSafariHelp() {
+    const nextSettings = { ...settings, safariHelpDismissed: true }
+    setSettings(nextSettings)
+    saveSettings(nextSettings)
+  }
+
   async function toggleNotifications(enabled: boolean) {
     if (enabled && 'Notification' in window && Notification.permission === 'default') {
       await Notification.requestPermission()
@@ -542,13 +567,21 @@ function App() {
 
   const maxDaily = Math.max(1, ...weekAnalytics.days.map((day) => day.quantity))
   const maxHourly = Math.max(1, ...hourlyAnalytics)
+  const periodChart = <section className="period-chart"><div className="section-heading"><h2>Динаміка</h2><div className="forecast-switch"><button type="button" aria-pressed={chartPeriod === 30} onClick={() => setChartPeriod(30)}>{t(settings.language, 'month')}</button><button type="button" aria-pressed={chartPeriod === 90} onClick={() => setChartPeriod(90)}>{t(settings.language, 'quarter')}</button><button type="button" aria-pressed={chartPeriod === 365} onClick={() => setChartPeriod(365)}>{t(settings.language, 'year')}</button></div></div><div className="bar-chart" aria-label="Динаміка споживання">{periodBars.map((bar) => <div className="bar-column" data-testid="period-bar" key={bar.label}><span>{bar.quantity || ''}</span><i style={{ height: `${(bar.quantity / maxPeriodBar) * 100}%` }} /><small>{bar.label}</small></div>)}</div></section>
+  const achievementCard = <section className="achievements-card"><h2>{t(settings.language, 'achievements')}</h2><div className="achievement-grid"><div><strong>{formatPause(achievements.longestPauseMinutes)}</strong><span>{t(settings.language, 'longestPause')}</span></div><div><strong>{achievements.underGoalDays}</strong><span>{t(settings.language, 'underGoal')}</span></div><div><strong>{formatUah(achievements.savedMinor)}</strong><span>{t(settings.language, 'saved')}</span></div><div><strong>{formatMinutes(achievements.returnedMinutes)}</strong><span>{t(settings.language, 'returned')}</span></div></div></section>
 
   return (
     <main className="tracker">
-      <header><p>Приватний облік · лише на цьому пристрої</p><h1>{tab === 'today' ? 'Сьогодні' : tab === 'week' ? 'Тиждень' : 'Налаштування'}</h1></header>
-      <nav className="tabs" aria-label="Розділи"><button type="button" role="tab" aria-selected={tab === 'today'} onClick={() => setTab('today')}>Сьогодні</button><button type="button" role="tab" aria-selected={tab === 'week'} onClick={() => setTab('week')}>Тиждень</button><button type="button" role="tab" aria-selected={tab === 'settings'} onClick={() => setTab('settings')}>Налаштування</button></nav>
+      {tab === 'week' && periodChart}
+      {tab === 'week' && achievementCard}
+      <header><p>Приватний облік · лише на цьому пристрої</p><h1>{tab === 'today' ? t(settings.language, 'today') : tab === 'week' ? t(settings.language, 'week') : t(settings.language, 'settings')}</h1></header>
+      <nav className="tabs" aria-label="Розділи"><button type="button" role="tab" aria-selected={tab === 'today'} onClick={() => setTab('today')}>{t(settings.language, 'today')}</button><button type="button" role="tab" aria-selected={tab === 'week'} onClick={() => setTab('week')}>{t(settings.language, 'week')}</button><button type="button" role="tab" aria-selected={tab === 'settings'} onClick={() => setTab('settings')}>{t(settings.language, 'settings')}</button></nav>
       {notice && <p role="status" className="notice">{notice}{undoState && <button type="button" className="text-button undo-button" onClick={() => void undoLatest()}>Скасувати</button>}</p>}
       <PwaUpdateNotice />
+      {tab === 'settings' && <>
+        <section className="settings-card release-settings"><h2>{t(settings.language, 'language')}</h2><label>Мова<select aria-label="Мова інтерфейсу" value={settings.language} onChange={(event) => { const next = { ...settings, language: event.target.value as TrackerSettings['language'] }; setSettings(next); saveSettings(next) }}><option value="uk">Українська</option><option value="ru">Русский</option><option value="en">English</option></select></label><form className="goal-form" onSubmit={saveDailyGoal}><label>{t(settings.language, 'goal')}<input inputMode="numeric" value={dailyGoalInput} onChange={(event) => setDailyGoalInput(event.target.value)} placeholder={settings.dailyGoalQuantity ? String(settings.dailyGoalQuantity) : 'Наприклад, 12'} /></label><button type="submit">{t(settings.language, 'save')}</button></form>{settings.dailyGoalQuantity !== null && <p>Поточна ціль: {settings.dailyGoalQuantity} шт.</p>}</section>
+        {!settings.safariHelpDismissed && <section className="safari-help"><h2>{t(settings.language, 'safari')}</h2><p>{t(settings.language, 'safariText')}</p><button type="button" className="text-button" onClick={dismissSafariHelp}>{t(settings.language, 'dismiss')}</button></section>}
+      </>}
       {pauseReminderVisible && <section className="pause-reminder" role="alert"><strong>Ти кинув курити?</strong><p>Продовжуй у тому ж дусі. Якщо це була просто пауза — нічого не потрібно додавати.</p><div className="form-actions"><button type="button" onClick={() => { setPauseReminderVisible(false); setEventEditorOpen(true); openNewEvent() }}>Відмітити зараз</button><button type="button" className="text-button" onClick={() => setPauseReminderVisible(false)}>Це була пауза</button></div></section>}
       {tab === 'today' && <>
         <section className="interval-card"><span>З останнього разу</span>{lastEvent ? <><strong>{formatElapsedSince(lastEvent.occurredAt, now)}</strong><small>{formatEventDate(lastEvent.occurredAt)}</small></> : <strong>Ще немає записів.</strong>}</section>
@@ -571,7 +604,8 @@ function App() {
           <label>Причина / ситуація<select value={eventTagId} onChange={(event) => setEventTagId(event.target.value)}><option value="">Без тегу</option>{eventTags.map((tag) => <option key={tag.id} value={tag.id}>{tag.icon} {tag.label}</option>)}</select></label>
           <div className="form-actions"><button type="submit">Зберегти запис</button><button type="button" className="text-button" onClick={() => { setEditingEvent(null); setEventProductId(''); setEventEditorOpen(false) }}>Скасувати</button></div>
         </form>}
-        <section className="awareness-card" aria-label="Час і гроші"><div className="section-heading"><h2>За такого темпу</h2><div className="forecast-switch" aria-label="Період прогнозу"><button type="button" aria-pressed={forecastPeriod === 30} onClick={() => setForecastPeriod(30)}>Місяць</button><button type="button" aria-pressed={forecastPeriod === 90} onClick={() => setForecastPeriod(90)}>Квартал</button></div></div>{forecast ? <div data-testid="money-forecast"><strong>{forecast.periodDays} днів · {formatUah(forecast.costMinor)}</strong><p>За такого темпу за {forecast.periodDays === 30 ? 'місяць' : 'квартал'} піде {formatUah(forecast.costMinor)}.</p><p>Якщо не курити від сьогодні — ці гроші залишаться у тебе.</p><p className="forecast-estimate">≈ {formatMinutes(forecast.estimatedMinutes)} на перекури</p><small>Оцінка: 7 хв на сигарету або стік.</small></div> : <p className="muted">Прогноз з’явиться після 7 днів обліку.</p>}</section>
+        <section className="awareness-card" aria-label="Час і гроші"><div className="section-heading"><h2>За такого темпу</h2><div className="forecast-switch" aria-label="Період прогнозу"><button type="button" aria-pressed={forecastPeriod === 30} onClick={() => setForecastPeriod(30)}>{t(settings.language, 'month')}</button><button type="button" aria-pressed={forecastPeriod === 90} onClick={() => setForecastPeriod(90)}>{t(settings.language, 'quarter')}</button><button type="button" aria-pressed={forecastPeriod === 365} onClick={() => setForecastPeriod(365)}>{t(settings.language, 'year')}</button></div></div>{forecast ? <div data-testid="money-forecast"><strong>{forecast.periodDays} днів · {formatUah(forecast.costMinor)}</strong><p>{t(settings.language, 'projected')}: {formatUah(forecast.costMinor)}.</p><p>{t(settings.language, 'observed')}: {formatUah(summarizeEvents(weekEvents, productsById).costMinor)} · {summarizeEvents(weekEvents, productsById).quantity} шт.</p><p>Якщо не курити від сьогодні — ці гроші залишаться у тебе.</p><p className="forecast-estimate">≈ {formatMinutes(forecast.estimatedMinutes)} на перекури</p><small>Оцінка: 7 хв на сигарету або стік.</small></div> : <p className="muted">Прогноз з’явиться після 7 днів обліку.</p>}</section>
+        {settings.dailyGoalQuantity !== null && <section className="reduction-card"><h2>{t(settings.language, 'reduction')}</h2><p>Сьогодні: <strong>{summary.quantity} / {settings.dailyGoalQuantity} шт.</strong></p><progress max={settings.dailyGoalQuantity} value={Math.min(summary.quantity, settings.dailyGoalQuantity)} aria-label="Прогрес денної цілі" />{summary.quantity > settings.dailyGoalQuantity ? <p className="calm-prompt">Перевищено на {summary.quantity - settings.dailyGoalQuantity} шт. Дані без осуду.</p> : <p>Залишилось: {settings.dailyGoalQuantity - summary.quantity} шт.</p>}</section>}
         <button type="button" className="health-card" aria-label="Про здоров’я" onClick={() => setHealthDialogOpen(true)}><span>Факт про здоров’я</span><strong>{healthInsight.title}</strong><small>{healthInsight.summary}</small></button>
         {contextMessage && <p className="context-prompt">{contextMessage}</p>}
         <section>

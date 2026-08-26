@@ -1,0 +1,11 @@
+.period-chart, .achievements-card, .release-settings, .safari-help, .reduction-card { margin: 14px 0; padding: 16px; border: 1px solid #2e2e38; border-radius: 18px; background: #15151b; }
+.period-chart .bar-chart { margin-top: 12px; }
+.achievement-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.achievement-grid div { display: grid; gap: 3px; padding: 12px; border-radius: 12px; background: #22202a; }
+.achievement-grid strong { color: #ffad90; font-size: 1.1rem; }
+.achievement-grid span { color: #aaa9b3; font-size: .78rem; }
+.safari-help { border-color: #754022; background: #2a1c19; }
+.safari-help p { color: #f0c1ae; line-height: 1.4; }
+.release-settings select { width: 100%; margin-top: 6px; }
+.reduction-card { border-color: #315d43; background: linear-gradient(135deg, #122319, #121719); }
+.reduction-card progress { width: 100%; height: 10px; accent-color: #72c692; }

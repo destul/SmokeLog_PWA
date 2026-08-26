@@ -25,6 +25,9 @@ describe('local tracker settings', () => {
       quietHoursEnd: 7,
       savingsGoalMinor: 25_000,
       reminderSentForEventId: 'event-1',
+      language: 'uk' as const,
+      dailyGoalQuantity: 12,
+      safariHelpDismissed: false,
     }
 
     saveSettings(settings, adapter)

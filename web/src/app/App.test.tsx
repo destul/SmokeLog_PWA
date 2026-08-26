@@ -449,6 +449,8 @@ describe('App', () => {
     expect(screen.getByText('Оцінка: 7 хв на сигарету або стік.')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Квартал' }))
     expect(screen.getByTestId('money-forecast')).toHaveTextContent('90 днів')
+    await user.click(screen.getByRole('button', { name: 'Рік' }))
+    expect(screen.getByTestId('money-forecast')).toHaveTextContent('365 днів')
   })
 
   test('shows an unavailable forecast before seven observed days', async () => {

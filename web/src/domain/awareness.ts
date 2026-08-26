@@ -6,7 +6,7 @@ import type { ConsumptionEvent, CravingEvent, Product } from './types'
 export type AwarenessForecast = {
   costMinor: number
   estimatedMinutes: number
-  periodDays: 30 | 90
+  periodDays: 30 | 90 | 365
 }
 
 export type CravingSummary = {
@@ -23,7 +23,7 @@ export function forecastForPeriod(
   events: ConsumptionEvent[],
   products: Map<string, Product>,
   now: Date,
-  periodDays: 30 | 90,
+  periodDays: 30 | 90 | 365,
 ): AwarenessForecast | null {
   const observedDayKeys = sevenDayKeys(now)
   const observedDays = new Set(observedDayKeys)

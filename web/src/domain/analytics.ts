@@ -1,6 +1,25 @@
 import { localDayKey } from './dates'
 import type { ConsumptionEvent } from './types'
 
+export type PeriodBar = { label: string; quantity: number }
+
+export function summarizePeriodBars(events: ConsumptionEvent[], now: Date, periodDays: 30 | 90 | 365): PeriodBar[] {
+  if (periodDays === 365) {
+    return Array.from({ length: 12 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth() - (11 - index), 1)
+      const month = date.getMonth()
+      const year = date.getFullYear()
+      return { label: new Intl.DateTimeFormat('uk-UA', { month: 'short' }).format(date), quantity: events.filter((event) => { const occurred = new Date(event.occurredAt); return occurred.getFullYear() === year && occurred.getMonth() === month }).reduce((sum, event) => sum + event.quantity, 0) }
+    })
+  }
+  const bucketCount = periodDays === 30 ? 6 : 9
+  return Array.from({ length: bucketCount }, (_, index) => {
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (bucketCount - 1 - index) * (periodDays === 30 ? 5 : 10))
+    const start = new Date(end.getFullYear(), end.getMonth(), end.getDate() - (periodDays === 30 ? 4 : 9))
+    return { label: `${start.getDate()}.${start.getMonth() + 1}`, quantity: events.filter((event) => { const time = new Date(event.occurredAt).getTime(); return time >= start.getTime() && time <= new Date(end.getFullYear(), end.getMonth(), end.getDate() + 1).getTime() }).reduce((sum, event) => sum + event.quantity, 0) }
+  })
+}
+
 export type WeekAnalytics = {
   days: Array<{ key: string; quantity: number }>
   hours: number[]

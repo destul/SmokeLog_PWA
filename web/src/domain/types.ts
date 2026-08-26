@@ -1,6 +1,7 @@
 import type { TriggerTagId } from './tags'
 
 export type Category = 'cigarette' | 'stick' | 'vape' | 'snus'
+export type Language = 'uk' | 'ru' | 'en'
 export type SnusKind = 'tobacco' | 'nicotine-pouch'
 export type CravingOutcome = 'smoked' | 'resisted'
 
