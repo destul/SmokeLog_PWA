@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import App from '../App'
-import { resetDatabaseForTests, saveCraving, saveEvent, saveProduct } from '../storage/db'
+import { listEvents, listProducts, resetDatabaseForTests, saveCraving, saveEvent, saveProduct } from '../storage/db'
 import type { Category, ConsumptionEvent, CravingEvent, Product } from '../domain/types'
 
 function savedProduct(
@@ -290,6 +290,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Зберегти продукт' }))
     await user.click(await screen.findByRole('button', { name: /Parliament · \+1 сигарету/ }))
     await user.click(screen.getByRole('tab', { name: 'Налаштування' }))
+    await user.click(await screen.findByRole('button', { name: 'Змінити Parliament' }))
     await user.click(await screen.findByRole('button', { name: 'Приховати Parliament' }))
 
     expect(await screen.findByText('Приховано: Parliament')).toBeTruthy()
@@ -425,6 +426,7 @@ describe('App', () => {
     render(<App />)
     await user.click(screen.getByRole('tab', { name: 'Налаштування' }))
     await user.click(screen.getByRole('button', { name: 'Змінити Parliament' }))
+    await user.click(screen.getByRole('button', { name: 'Змінити ціну' }))
     await user.clear(screen.getByLabelText('Ціна пачки'))
     await user.type(screen.getByLabelText('Ціна пачки'), '120')
     await user.click(screen.getByRole('button', { name: 'Зберегти зміни' }))
