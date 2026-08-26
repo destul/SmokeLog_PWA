@@ -445,7 +445,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(await screen.findByTestId('money-forecast')).toHaveTextContent('За такого темпу')
+    expect(await screen.findByTestId('money-forecast')).toHaveTextContent('Прогноз за темпом')
     expect(screen.getByText('Оцінка: 7 хв на сигарету або стік.')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Квартал' }))
     expect(screen.getByTestId('money-forecast')).toHaveTextContent('90 днів')
