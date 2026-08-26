@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
@@ -163,7 +163,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: /Parliament · \+1 сигарету/ }))
     await user.click(screen.getByRole('button', { name: 'Скасувати' }))
 
-    expect(screen.queryByRole('button', { name: 'Редагувати Parliament' })).toBeNull()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Редагувати Parliament' })).toBeNull())
     expect(screen.getByText('0 шт.')).toBeTruthy()
   })
 
