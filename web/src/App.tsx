@@ -150,7 +150,6 @@ function App() {
   const [undoState, setUndoState] = useState<{ label: string; restore: () => Promise<void> } | null>(null)
   const isVape = category === 'vape'
   const undoTimerRef = useRef<number | undefined>(undefined)
-  const journalScrollRef = useRef<number | null>(null)
 
   async function refresh() {
     const [nextProducts, nextEvents, nextCravings] = await Promise.all([
@@ -410,7 +409,7 @@ function App() {
   }
 
   function openEditEvent(event: ConsumptionEvent) {
-    journalScrollRef.current = window.scrollY
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     setEventEditorOpen(true)
     setEditingEvent(event)
     setEventProductId(event.productId)
@@ -426,7 +425,7 @@ function App() {
       openNewEvent()
       return
     }
-    journalScrollRef.current = window.scrollY
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     setEventEditorOpen(true)
     setEditingEvent(null)
     setEventProductId(previous.event.productId)
@@ -465,11 +464,6 @@ function App() {
     setEventEditorOpen(false)
     setNotice(editingEvent ? 'Запис змінено.' : 'Запис додано.')
     await refresh()
-    if (journalScrollRef.current !== null) {
-      const scrollTop = journalScrollRef.current
-      journalScrollRef.current = null
-      requestAnimationFrame(() => window.scrollTo({ top: scrollTop }))
-    }
   }
 
   async function confirmDelete() {
