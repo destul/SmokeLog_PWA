@@ -306,6 +306,7 @@ describe('App', () => {
     const user = userEvent.setup()
     render(<App />)
     await user.click(screen.getByRole('tab', { name: 'Налаштування' }))
+    await user.click(await screen.findByRole('button', { name: 'Змінити Parliament' }))
     await user.click(await screen.findByRole('button', { name: 'Приховати Parliament' }))
 
     expect(await screen.findByText('Приховано: Parliament')).toBeTruthy()
